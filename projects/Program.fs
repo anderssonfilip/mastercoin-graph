@@ -6,6 +6,8 @@ open System.Text.RegularExpressions
 
 let ePoch = new DateTime(1970, 1, 1, 0, 0, 0)
 
+type Currency = MSC = 0 | TMSC = 1
+
 type tx = {
             sender : String
             receiver : String
@@ -46,67 +48,93 @@ let lineSequence(file) =
             else 
                 Some(line,reader.ReadLine())) (reader.ReadLine())
 
+// Export balances for all addresses for a specified currency
+let ExportBalances currency = 
+    let uri = "https://masterchain.info/mastercoin_verify/addresses/" + ((int)currency).ToString()
+    let req = WebRequest.Create(uri)
 
-[<EntryPoint>]
-let Main args =
-
-    let data = Seq.toList (lineSequence("balances.json"))
-
-    let matches = Regex.Matches(data.Head, "(?<=\"address\":\s\").+?(?=\")") |> Seq.cast<Match> |> Seq.map (fun m -> m.Value)
-
-    let addresses = Seq.toList matches
-    
-    //let address = lineSequence("addr.json") |> Seq.head
-
-    //let req = WebRequest.Create(String.Format("https://masterchain.info/addr/{0}.json", addresses.Head))
-    let req = WebRequest.Create("https://masterchain.info/addr/1KHE3kL1tkiswq27hPH7R8AT1X3u9UaCzy.json")
     let resp = req.GetResponse()
     let stream = resp.GetResponseStream()
     use reader = new IO.StreamReader(stream)
 
-    let addr = Addr.Parse(reader.ReadToEnd())
+    let balances = Balance.Parse(reader.ReadToEnd())
 
-    let sentMSC = seq {for tx in addr.``0``.SentTransactions do
-                         yield {sender = tx.FromAddress
-                                receiver = tx.ToAddress
-                                amount = tx.FormattedAmount
-                                block = tx.Block
-                                currencyId = tx.CurrencyId
-                                details = tx.Details
-                                icon = tx.Icon
-                                index = tx.Index
-                                invalid = tx.Invalid
-                                method_ = tx.Method
-                                transactionType = tx.TransactionType
-                                transactionVersion = tx.TransactionVersion
-                                txHash = tx.TxHash
-                                txTime = ePoch.AddTicks(tx.TxTime)
-                                txType = tx.TxTypeStr}} |> Seq.toList
+    use writer = new StreamWriter(String.Format("balances{0}.csv", currency), false, System.Text.Encoding.ASCII)
+    for b in balances do
+        writer.WriteLine(String.Join(",", b.Address, b.Balance))
 
-    let sentTMSC = seq {for tx in addr.``1``.SentTransactions do
-                         yield {sender = tx.FromAddress
-                                receiver = tx.ToAddress
-                                amount = tx.FormattedAmount
-                                block = tx.Block
-                                currencyId = tx.CurrencyId
-                                details = tx.Details
-                                icon = tx.Icon
-                                index = tx.Index
-                                invalid = tx.Invalid
-                                method_ = tx.Method
-                                transactionType = tx.TransactionType
-                                transactionVersion = tx.TransactionVersion
-                                txHash = tx.TxHash
-                                txTime = ePoch.AddTicks(tx.TxTime)
-                                txType = tx.TxTypeStr}} |> Seq.toList
+// declare transaction sequences
+let mutable txMSC = Seq.empty<tx>
+let mutable txTMSC = Seq.empty<tx>
 
-    use writer = new StreamWriter("txMSC.csv", false, System.Text.Encoding.UTF8)
-    Seq.iter (fun (t:tx) -> writer.WriteLine(String.Join(",", t.sender, t.receiver, t.amount))) sentMSC
+// Send webrequest and get transaction for Address 'a
+let RequestTransactions (a:String) = 
+    let req = WebRequest.Create(String.Format("https://masterchain.info/addr/{0}.json", a))
+    let resp = req.GetResponse()
+    let stream = resp.GetResponseStream()
+    use reader = new IO.StreamReader(stream)
 
-    use writer = new StreamWriter("txTMSC.csv", false, System.Text.Encoding.UTF8)
-    Seq.iter (fun (t:tx) -> writer.WriteLine(String.Join(",", t.sender, t.receiver, t.amount))) sentTMSC
+    let root = Addr.Parse(reader.ReadToEnd())
 
+    let sentMSC = seq {for tx in root.``0``.SentTransactions do
+                            yield { sender = tx.FromAddress
+                                    receiver = tx.ToAddress
+                                    amount = tx.FormattedAmount
+                                    block = tx.Block
+                                    currencyId = tx.CurrencyId
+                                    details = tx.Details
+                                    icon = tx.Icon
+                                    index = tx.Index
+                                    invalid = tx.Invalid
+                                    method_ = tx.Method
+                                    transactionType = tx.TransactionType
+                                    transactionVersion = -1//tx.TransactionVersion  <- throws exception on some addresses
+                                    txHash = tx.TxHash
+                                    txTime = ePoch.AddTicks(tx.TxTime)
+                                    txType = tx.TxTypeStr}} |> Seq.toList
 
+    txMSC <- Seq.append txMSC sentMSC
+
+    let sentTMSC = seq {for tx in root.``1``.SentTransactions do
+                            yield { sender = tx.FromAddress
+                                    receiver = tx.ToAddress
+                                    amount = tx.FormattedAmount
+                                    block = tx.Block
+                                    currencyId = tx.CurrencyId
+                                    details = tx.Details
+                                    icon = tx.Icon
+                                    index = tx.Index
+                                    invalid = tx.Invalid
+                                    method_ = tx.Method
+                                    transactionType = tx.TransactionType
+                                    transactionVersion = -1//tx.TransactionVersion  <- throws exception on some addresses
+                                    txHash = tx.TxHash
+                                    txTime = ePoch.AddTicks(tx.TxTime)
+                                    txType = tx.TxTypeStr}} |> Seq.toList
+
+    txTMSC <- Seq.append txTMSC sentTMSC
+    
+    Console.WriteLine(String.Format("https://masterchain.info/addr/{0}.json {1} {2}", a, sentMSC.Length, sentTMSC.Length))
+
+[<EntryPoint>]
+let Main args =
+
+    ExportBalances Currency.MSC
+    ExportBalances Currency.TMSC
+
+    use reader = new StreamReader("balancesMSC.csv")
+    
+    let addresses = seq {while not reader.EndOfStream do
+                            yield reader.ReadLine().Split(',').[0]
+                        }
+
+    addresses |>  Seq.iter (fun a -> RequestTransactions a)
+ 
+    use writer = new StreamWriter("txMSC.csv", false, System.Text.Encoding.ASCII)
+    Seq.iter (fun (t:tx) -> writer.WriteLine(String.Join(",", t.sender, t.receiver, t.amount))) txMSC
+
+    use writer = new StreamWriter("txTMSC.csv", false, System.Text.Encoding.ASCII)
+    Seq.iter (fun (t:tx) -> writer.WriteLine(String.Join(",", t.sender, t.receiver, t.amount))) txTMSC
 
     0 // return OK
 

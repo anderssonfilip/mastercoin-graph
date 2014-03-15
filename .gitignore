@@ -213,3 +213,6 @@ pip-log.txt
 
 #Mr Developer
 .mr.developer.cfg
+*.dll
+projects/packages/FSharp.Data.1.1.10/lib/net40/FSharp.Data.DesignTime.xml
+*.xml
