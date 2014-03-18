@@ -48,6 +48,7 @@
     <WarningLevel>3</WarningLevel>
     <DocumentationFile>bin\Debug\scraper.XML</DocumentationFile>
     <PlatformTarget>AnyCPU</PlatformTarget>
+    <StartArguments>f</StartArguments>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
@@ -73,7 +74,10 @@
     <None Include="balances.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <Compile Include="Program.fs" />
+    <Content Include="faucet.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Compile Include="MastercoinImporter.fs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="FSharp.Data">
@@ -88,6 +92,7 @@
     <Reference Include="FSharp.Core" />
     <Reference Include="System" />
     <Reference Include="System.Core" />
+    <Reference Include="System.Data" />
     <Reference Include="System.Net" />
     <Reference Include="System.Numerics" />
     <Reference Include="System.Xml.Linq" />

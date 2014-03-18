@@ -1,4 +1,6 @@
-﻿open FSharp.Data
+﻿module MastercoinImporter
+
+open FSharp.Data
 open System 
 open System.IO
 open System.Net
@@ -119,22 +121,36 @@ let RequestTransactions (a:String) =
 [<EntryPoint>]
 let Main args =
 
-    ExportBalances Currency.MSC
-    ExportBalances Currency.TMSC
-
-    use reader = new StreamReader("balancesMSC.csv")
-    
-    let addresses = seq {while not reader.EndOfStream do
+    let mutable addresses = Seq.empty
+    if args.Length = 0 then
+        ExportBalances Currency.MSC
+        ExportBalances Currency.TMSC
+        use reader = new StreamReader("balancesMSC.csv")
+        addresses <- seq {while not reader.EndOfStream do
                             yield reader.ReadLine().Split(',').[0]
                         }
+    elif args.[0] = "f" then
+        use reader = new StreamReader("faucet.txt")
+        addresses <- seq {while not reader.EndOfStream do
+                            let addr = reader.ReadLine()
+                            if String.IsNullOrEmpty(addr) = false then
+                                yield addr
+                         } |> Seq.toArray
 
     addresses |>  Seq.iter (fun a -> RequestTransactions a)
  
+    let header = String.Join(",", "From", "To", "Amount", "Block", "CurrencyId", "Details", "Icon", "Index", "Invalid", "Method", "TransactionType", "TransactionVersion", "Hash", "DateTime", "Type")
+    
     use writer = new StreamWriter("txMSC.csv", false, System.Text.Encoding.ASCII)
-    Seq.iter (fun (t:tx) -> writer.WriteLine(String.Join(",", t.sender, t.receiver, t.amount))) txMSC
+    writer.WriteLine(header)
+    Seq.iter (fun (t:tx) -> writer.WriteLine(String.Join(",", t.sender, t.receiver, t.amount, t.block, t.currencyId, t.details, t.icon, t.index, t.invalid, t.method_, t.transactionType, t.transactionVersion, t.txHash, t.txTime, t.txType))) 
+                txMSC
+
 
     use writer = new StreamWriter("txTMSC.csv", false, System.Text.Encoding.ASCII)
-    Seq.iter (fun (t:tx) -> writer.WriteLine(String.Join(",", t.sender, t.receiver, t.amount))) txTMSC
+    writer.WriteLine(header)
+    Seq.iter (fun (t:tx) -> writer.WriteLine(String.Join(",", t.sender, t.receiver, t.amount, t.block, t.currencyId, t.details, t.icon, t.index, t.invalid, t.method_, t.transactionType, t.transactionVersion, t.txHash, t.txTime, t.txType)))
+                txTMSC
 
     0 // return OK
 
