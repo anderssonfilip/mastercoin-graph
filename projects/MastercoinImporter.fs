@@ -10,6 +10,10 @@ let ePoch = new DateTime(1970, 1, 1, 0, 0, 0)
 
 type Currency = MSC = 0 | TMSC = 1
 
+/// To use local TimeZone instead of UTC
+let UseLocalTimeZone = false
+
+
 type tx = {
             sender : String
             receiver : String
@@ -71,52 +75,63 @@ let mutable txTMSC = Seq.empty<tx>
 
 // Send webrequest and get transaction for Address 'a
 let RequestTransactions (a:String) = 
-    let req = WebRequest.Create(String.Format("https://masterchain.info/addr/{0}.json", a))
-    let resp = req.GetResponse()
-    let stream = resp.GetResponseStream()
-    use reader = new IO.StreamReader(stream)
+    async {
+    try
+        let req = WebRequest.Create(String.Format("https://masterchain.info/addr/{0}.json", a))
+        let! resp = req.AsyncGetResponse()
+        let stream = resp.GetResponseStream()
+        use reader = new IO.StreamReader(stream)
 
-    let root = Addr.Parse(reader.ReadToEnd())
+        let root = Addr.Parse(reader.ReadToEnd())
 
-    let sentMSC = seq {for tx in root.``0``.SentTransactions do
-                            yield { sender = tx.FromAddress
-                                    receiver = tx.ToAddress
-                                    amount = tx.FormattedAmount
-                                    block = tx.Block
-                                    currencyId = tx.CurrencyId
-                                    details = tx.Details
-                                    icon = tx.Icon
-                                    index = tx.Index
-                                    invalid = tx.Invalid
-                                    method_ = tx.Method
-                                    transactionType = tx.TransactionType
-                                    transactionVersion = -1//tx.TransactionVersion  <- throws exception on some addresses
-                                    txHash = tx.TxHash
-                                    txTime = ePoch.AddTicks(tx.TxTime)
-                                    txType = tx.TxTypeStr}} |> Seq.toList
+        let sentMSC = seq {for tx in root.``0``.SentTransactions do  // ``0`` for MSC
+                                yield { sender = tx.FromAddress
+                                        receiver = tx.ToAddress
+                                        amount = tx.FormattedAmount
+                                        block = tx.Block
+                                        currencyId = tx.CurrencyId
+                                        details = tx.Details
+                                        icon = tx.Icon
+                                        index = tx.Index
+                                        invalid = tx.Invalid
+                                        method_ = tx.Method
+                                        transactionType = tx.TransactionType
+                                        transactionVersion = -1//tx.TransactionVersion  <- throws exception on some addresses
+                                        txHash = tx.TxHash
+                                        txTime = match UseLocalTimeZone with 
+                                                    | false -> ePoch.AddMilliseconds((float)tx.TxTime)
+                                                    | true -> TimeZoneInfo.ConvertTimeFromUtc(ePoch.AddMilliseconds((float)tx.TxTime), TimeZoneInfo.Local)
+                                        txType = tx.TxTypeStr}} |> Seq.toList
 
-    txMSC <- Seq.append txMSC sentMSC
+        txMSC <- Seq.append txMSC sentMSC
 
-    let sentTMSC = seq {for tx in root.``1``.SentTransactions do
-                            yield { sender = tx.FromAddress
-                                    receiver = tx.ToAddress
-                                    amount = tx.FormattedAmount
-                                    block = tx.Block
-                                    currencyId = tx.CurrencyId
-                                    details = tx.Details
-                                    icon = tx.Icon
-                                    index = tx.Index
-                                    invalid = tx.Invalid
-                                    method_ = tx.Method
-                                    transactionType = tx.TransactionType
-                                    transactionVersion = -1//tx.TransactionVersion  <- throws exception on some addresses
-                                    txHash = tx.TxHash
-                                    txTime = ePoch.AddTicks(tx.TxTime)
-                                    txType = tx.TxTypeStr}} |> Seq.toList
+        let sentTMSC = seq {for tx in root.``1``.SentTransactions do   // ``1`` for TMSC
+                                yield { sender = tx.FromAddress
+                                        receiver = tx.ToAddress
+                                        amount = tx.FormattedAmount
+                                        block = tx.Block
+                                        currencyId = tx.CurrencyId
+                                        details = tx.Details
+                                        icon = tx.Icon
+                                        index = tx.Index
+                                        invalid = tx.Invalid
+                                        method_ = tx.Method
+                                        transactionType = tx.TransactionType
+                                        transactionVersion = -1//tx.TransactionVersion  <- throws exception on some addresses
+                                        txHash = tx.TxHash
+                                        txTime = match UseLocalTimeZone with 
+                                                    | false -> ePoch.AddMilliseconds((float)tx.TxTime)
+                                                    | true -> TimeZoneInfo.ConvertTimeFromUtc(ePoch.AddMilliseconds((float)tx.TxTime), TimeZoneInfo.Local)
+                                        txType = tx.TxTypeStr}} |> Seq.toList
 
-    txTMSC <- Seq.append txTMSC sentTMSC
+        txTMSC <- Seq.append txTMSC sentTMSC
     
-    Console.WriteLine(String.Format("https://masterchain.info/addr/{0}.json {1} {2}", a, sentMSC.Length, sentTMSC.Length))
+        Console.WriteLine(String.Format("https://masterchain.info/addr/{0}.json {1} {2}", a, sentMSC.Length, sentTMSC.Length))
+     
+     with
+     | ex -> printfn "%s" (ex.Message);
+    }
+
 
 [<EntryPoint>]
 let Main args =
@@ -128,7 +143,7 @@ let Main args =
         use reader = new StreamReader("balancesMSC.csv")
         addresses <- seq {while not reader.EndOfStream do
                             yield reader.ReadLine().Split(',').[0]
-                        }
+                         } |> Seq.toArray
     elif args.[0] = "f" then
         use reader = new StreamReader("faucet.txt")
         addresses <- seq {while not reader.EndOfStream do
@@ -137,8 +152,8 @@ let Main args =
                                 yield addr
                          } |> Seq.toArray
 
-    addresses |>  Seq.iter (fun a -> RequestTransactions a)
- 
+    addresses |>  Seq.map RequestTransactions |> Async.Parallel |> Async.RunSynchronously |> ignore
+
     let header = String.Join(",", "From", "To", "Amount", "Block", "CurrencyId", "Details", "Icon", "Index", "Invalid", "Method", "TransactionType", "TransactionVersion", "Hash", "DateTime", "Type")
     
     use writer = new StreamWriter("txMSC.csv", false, System.Text.Encoding.ASCII)
@@ -146,11 +161,14 @@ let Main args =
     Seq.iter (fun (t:tx) -> writer.WriteLine(String.Join(",", t.sender, t.receiver, t.amount, t.block, t.currencyId, t.details, t.icon, t.index, t.invalid, t.method_, t.transactionType, t.transactionVersion, t.txHash, t.txTime, t.txType))) 
                 txMSC
 
+    Console.WriteLine(String.Format("Imported {0} MSC tx", Seq.length txMSC))
 
     use writer = new StreamWriter("txTMSC.csv", false, System.Text.Encoding.ASCII)
     writer.WriteLine(header)
     Seq.iter (fun (t:tx) -> writer.WriteLine(String.Join(",", t.sender, t.receiver, t.amount, t.block, t.currencyId, t.details, t.icon, t.index, t.invalid, t.method_, t.transactionType, t.transactionVersion, t.txHash, t.txTime, t.txType)))
                 txTMSC
+
+    Console.WriteLine(String.Format("Imported {0} TMSC tx", Seq.length txTMSC))
 
     0 // return OK
 
